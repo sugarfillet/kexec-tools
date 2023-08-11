@@ -15,6 +15,7 @@
 #include <errno.h>		/* For EINVAL */
 #include <libfdt.h>		/* For DeviceTree handling */
 #include "kexec-riscv.h"
+#include "iomem.h"
 
 const struct arch_map_entry arches[] = {
 	{ "riscv32", KEXEC_ARCH_RISCV },
@@ -32,12 +33,11 @@ static const char riscv_opts_usage[] =
 "	--append=STRING		Append STRING to the kernel command line.\n"
 "	--dtb=FILE		Use FILE as the device tree blob.\n"
 "	--initrd=FILE		Use FILE as the kernel initial ramdisk.\n"
-"	--cmdline=STRING	Use STRING as the kernel's command line.\n"
+"	--command-line=STRING	Use STRING as the kernel's command line.\n"
 "	--reuse-cmdline		Use kernel command line from running system.\n";
 
 static struct riscv_opts arch_options = {0};
 static struct fdt_image provided_fdt = {0};
-static struct memory_ranges sysmem_ranges = {0};
 
 /****************\
 * COMMON HELPERS *
@@ -79,20 +79,20 @@ int load_extra_segments(struct kexec_info *info, uint64_t kernel_base,
 		}
 
 		ret = dtb_add_range_property(&fdt->buf, &fdt->size, start, end,
-					     "memory", "linux,usable-memory");
+					     "chosen", "linux,usable-memory-range");
 		if (ret) {
-			fprintf(stderr, "Couldn't add usable-memory to fdt\n");
+			fprintf(stderr, "Couldn't add usable-memory-range to fdt\n");
 			return ret;
 		}
 
 		max_usable = end;
 	} else {
 		/*
-		 * Make sure we remove elfcorehdr and usable-memory
+		 * Make sure we remove elfcorehdr and usable-memory-range
 		 * when switching from crash kernel to a normal one.
 		 */
 		dtb_delete_property(fdt->buf, "chosen", "linux,elfcorehdr");
-		dtb_delete_property(fdt->buf, "memory", "linux,usable-memory");
+		dtb_delete_property(fdt->buf, "chosen", "linux,usable-memory-range");
 	}
 
 	/* Do we need to include an initrd image ? */
@@ -313,40 +313,57 @@ void arch_reuse_initrd(void)
 int get_memory_ranges(struct memory_range **range, int *num_ranges,
 		      unsigned long kexec_flags)
 {
-	const struct fdt_image *fdt = &provided_fdt;
-	struct memory_ranges *extra_ranges = NULL;
-	int i = 0;
+	struct memory_ranges sysmem_ranges = {0};
 	int ret = 0;
 
-	if (arch_options.initrd_start && arch_options.initrd_end) {
-		int initrd_size = arch_options.initrd_end - arch_options.initrd_start;
-		dbgprintf("Marking current intird image as reserved\n");
-		ret = mem_regions_alloc_and_add(extra_ranges,
-						arch_options.initrd_start,
-						initrd_size,
-						RANGE_RESERVED);
-		if (ret)
-			return ret;
+	const char *iomem = proc_iomem();
+	char line[MAX_LINE], *str;
+	FILE *fp;
+	unsigned long long start, end;
+	int consumed, count;
+
+	fp = fopen(iomem, "r");
+	if (!fp) {
+		fprintf(stderr, "Cannot open %s: %s\n", iomem, strerror(errno));
+		return -1;
 	}
 
-	ret = dtb_get_memory_ranges(fdt->buf, &sysmem_ranges, extra_ranges);
-	if (ret) {
-		fprintf(stderr, "Could not get memory ranges from device tree (%i) !\n", ret);
-		return ret;
+	while (fgets(line, sizeof(line), fp) != 0) {
+		count = sscanf(line, "%llx-%llx : %n", &start, &end, &consumed);
+		if (count != 2)
+			continue;
+		str = line + consumed;
+
+		if (!strncmp(str, SYSTEM_RAM, strlen(SYSTEM_RAM))){
+			ret = mem_regions_alloc_and_add(&sysmem_ranges,
+					start, end - start + 1, RANGE_RAM);
+			if (ret) {
+				fprintf(stderr,
+					"Cannot allocate memory for ranges\n");
+				fclose(fp);
+				return -ENOMEM;
+			}
+
+		} else if (!strncmp(str, IOMEM_RESERVED, strlen(IOMEM_RESERVED))){
+			ret = mem_regions_alloc_and_add(&sysmem_ranges,
+					start, end - start + 1, RANGE_RESERVED);
+			if (ret) {
+				fprintf(stderr,
+					"Cannot allocate memory for ranges\n");
+				fclose(fp);
+				return -ENOMEM;
+			}
+		} else
+			continue;
 	}
+
+	fclose(fp);
 
 	*range = sysmem_ranges.ranges;
 	*num_ranges = sysmem_ranges.size;
 
-	dbgprintf("Memory regions:\n");
-	for (i = 0; i < sysmem_ranges.size; i++) {
-		dbgprintf("\t0x%llx - 0x%llx : %s (%i)\n",
-			  sysmem_ranges.ranges[i].start,
-			  sysmem_ranges.ranges[i].end,
-			  sysmem_ranges.ranges[i].type == RANGE_RESERVED ?
-			  "RANGE_RESERVED" : "RANGE_RAM",
-			  sysmem_ranges.ranges[i].type);
-	}
+	dbgprint_mem_range("System RAM ranges;",
+				sysmem_ranges.ranges, sysmem_ranges.size);
 
 	return 0;
 }
