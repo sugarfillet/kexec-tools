@@ -79,20 +79,20 @@ int load_extra_segments(struct kexec_info *info, uint64_t kernel_base,
 		}
 
 		ret = dtb_add_range_property(&fdt->buf, &fdt->size, start, end,
-					     "memory", "linux,usable-memory");
+					     "chosen", "linux,usable-memory-range");
 		if (ret) {
-			fprintf(stderr, "Couldn't add usable-memory to fdt\n");
+			fprintf(stderr, "Couldn't add usable-memory-range to fdt\n");
 			return ret;
 		}
 
 		max_usable = end;
 	} else {
 		/*
-		 * Make sure we remove elfcorehdr and usable-memory
+		 * Make sure we remove elfcorehdr and usable-memory-range
 		 * when switching from crash kernel to a normal one.
 		 */
 		dtb_delete_property(fdt->buf, "chosen", "linux,elfcorehdr");
-		dtb_delete_property(fdt->buf, "memory", "linux,usable-memory");
+		dtb_delete_property(fdt->buf, "chosen", "linux,usable-memory-range");
 	}
 
 	/* Do we need to include an initrd image ? */
