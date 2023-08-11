@@ -1,5 +1,5 @@
 #include <errno.h>
-#include <linux/elf.h>
+#include <elf.h>
 #include <unistd.h>
 
 #include "kexec.h"
