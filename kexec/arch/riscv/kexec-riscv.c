@@ -41,7 +41,7 @@ static const char riscv_opts_usage[] =
 "	--append=STRING		Append STRING to the kernel command line.\n"
 "	--dtb=FILE		Use FILE as the device tree blob.\n"
 "	--initrd=FILE		Use FILE as the kernel initial ramdisk.\n"
-"	--cmdline=STRING	Use STRING as the kernel's command line.\n"
+"	--command-line=STRING	Use STRING as the kernel's command line.\n"
 "	--reuse-cmdline		Use kernel command line from running system.\n";
 
 static struct riscv_opts arch_options = {0};
